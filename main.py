@@ -49,19 +49,7 @@ screen_interval = 1000
 
 # setup pump
 pump = machine.Pin(14, machine.Pin.OUT)
-pump_hour = 12
-pump_min = 0
 
-# grab config from json
-json_data_file = open('config.json', 'r')
-data = ujson.loads(json_data_file.read())
-json_data_file.close()
-
-if data['pump_hour'] == "":
-    data['pump_hour'] = pump_hour
-
-if data['pump_min'] == "":
-    data['pump_min'] == pump_min
 
 # Setup Web Page
 def web_page():
@@ -71,14 +59,19 @@ def web_page():
     else:
         gpio_state="OFF"
 
-    html = """<html><head> <title>Dosing Pump Controller</title> <meta name="viewport" content="width=device-width, initial-scale=1">
+    html = """<html><head> <title>Dosing Pump Controller</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="icon" href="data:,"> <style>html{font-family: Helvetica; display:inline-block; margin: 0px auto; text-align: center;}
     h1{color: #0F3376; padding: 2vh;}p{font-size: 1.5rem;}.button{display: inline-block; background-color: #e7bd3b; border: none;
     border-radius: 4px; color: white; padding: 16px 40px; text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}
-    .button2{background-color: #4286f4;}</style></head><body> <h1>Dosing Pump Setup</h1>
+    .button2{background-color: #4286f4;}</style></head>
+    <body><h1>Dosing Pump Setup</h1>
     <p>PUMP state: <strong>""" + gpio_state + """</strong></p>
-    <p>Current Set Run Time: """ + str(data['pump_hour']) + """:""" + str(data['pump_min']) + """</p>
-    <p><form action="/?settime">Set Run Time:<input type=text id=phour name=phour>:<input type=text id=pmin name=pmin><input type=submit value=submit></form></p>
+    <p>Current Start Time: """ + str(data['pump_hour']) + """:""" + str(data['pump_min']) + """</p>
+    <p><form action="/?settime">Set Start Time</p>
+    <p><input type=text id=phour name=phour size=2>:<input type=text id=pmin name=pmin size=2><input type=submit value=submit></form></p>
+    <p>Current Run Length: """ + str(data['pump_runtime']) + """</p>
+    <p>Callibrate Run Length</p>
     <p><a href="/?pump=on"><button class="button">Callibrate Start</button></a></p>
     <p><a href="/?pump=off"><button class="button button2">Callibrate Stop</button></a></p></body></html>"""
     return html
@@ -87,6 +80,34 @@ def web_page():
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.bind(('', 80))
 s.listen(5)
+
+data = {'pump_hour': 12, 'pump_min':0, 'pump_runtime':0}
+
+def json_read():
+    # grab config from json
+    global data
+    global pump_hour
+    global pump_min
+    write_values=0
+    try:
+        json_data_file = open('config.json', 'r')
+        data = ujson.loads(json_data_file.read())
+        json_data_file.close()
+    except:
+        print("Cloud not read config file")
+        json_write()
+    if data.get('pump_hour')==None:
+        data['pump_hour'] = 12
+        write_values=1
+    if data.get('pump_min')==None:
+        data['pump_min'] = 0
+        write_values=1
+    if data.get('pump_runtime')==None:
+        data['pump_runtime'] = 10
+        write_values=1
+    if write_values:
+        json_write()
+    print(data)
 
 # Setup Json Write
 def json_write():
@@ -97,7 +118,7 @@ def json_write():
         json_data_file.write(ujson.dumps(data))
         json_data_file.close()
     except Exception as e:
-        print("Could not update config file: %s" % e)
+        print("Could not update config file")
 
 
 # Function initilization
@@ -125,9 +146,12 @@ def qs_parse(qs):
 
 def main():
     """main loop function"""
+
+    # Initilize local variables
     global data
     temp_start = utime.ticks_ms()
     screen_start = utime.ticks_ms()
+    time = dst_time()
 
     temperature = "NOTEMP"
 
@@ -142,6 +166,10 @@ def main():
             print(this_time)
             print_screen(this_time, temperature)
             screen_start = utime.ticks_ms()
+        if time[3] == data['pump_hour'] and time[4] == data['pump_min']:
+            pump.value(1)
+            utime.sleep_ms(data['pump_runtime']) # this is a blocking command, but shouldn't be an issue.
+            pump.value(0)
 
         r, w, err = select.select((s,), (), (), 1)
         if r:
@@ -157,14 +185,19 @@ def main():
                 if pump_on == 6:
                     print('LED ON')
                     pump.value(1)
+                    callibrate_start = utime.ticks_ms()
                 if pump_off == 6:
                     print('LED OFF')
                     pump.value(0)
+                    callibrate_stop = utime.ticks_ms()
+                    data['pump_runtime'] = callibrate_stop - callibrate_start
+                    json_write()
                 if set_time == 6:
                     parameters = qs_parse(request)
                     print(parameters)
                     data['pump_hour'] = parameters['phour']
                     data['pump_min'] = parameters['pmin']
+                    print(data)
                     json_write()
 
                 response = web_page()
@@ -178,4 +211,5 @@ print_screen('Initializing', '...')
 ntp.settime()
 time = dst_time()
 print(time)
+json_read()
 main()
