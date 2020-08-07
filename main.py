@@ -50,7 +50,6 @@ screen_interval = 1000
 # setup pump
 pump = machine.Pin(14, machine.Pin.OUT)
 
-
 # Setup Web Page
 def web_page():
     global data
@@ -58,6 +57,7 @@ def web_page():
         gpio_state="ON"
     else:
         gpio_state="OFF"
+
 
     html = """<html><head> <title>Dosing Pump Controller</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -73,7 +73,10 @@ def web_page():
     <p>Current Run Length: """ + str(data['pump_runtime']) + """</p>
     <p>Callibrate Run Length</p>
     <p><a href="/?pump=on"><button class="button">Callibrate Start</button></a></p>
-    <p><a href="/?pump=off"><button class="button button2">Callibrate Stop</button></a></p></body></html>"""
+    <p><a href="/?pump=off"><button class="button button2">Callibrate Stop</button></a></p>
+    <p><a href="/?prime=on"><button class="button">Prime Start</button></a></p>
+    <p><a href="/?prime=off"><button class="button button2">Prime Stop</button></a></p>
+    </body></html>"""
     return html
 
 # Setup Socket
@@ -122,13 +125,14 @@ def json_write():
 
 
 # Function initilization
-def print_screen(data0, data1):
+def print_screen(data0, data1, data2):
     """prints data to the OLED"""
     global data
     OLED.fill(0)
     OLED.text(sta_if.ifconfig()[0], 0, 0)
     OLED.text(data0, 0, 10)
-    OLED.text(data1, 0, 20)
+    OLED.text(data1, 50, 10)
+    OLED.text(data2, 0, 20)
     OLED.show()
 
 def c_to_f(c):
@@ -151,7 +155,10 @@ def main():
     global data
     temp_start = utime.ticks_ms()
     screen_start = utime.ticks_ms()
+    callibrate_start = temp_start # Initilize value in case website is in bad state
     time = dst_time()
+    pump_run = 1 # allows pump to run 1 time at next iteration
+    next_runtime = str(data['pump_hour'])+':'+str(data['pump_min'])
 
     temperature = "NOTEMP"
 
@@ -162,14 +169,21 @@ def main():
             temp_start = utime.ticks_ms()
         if utime.ticks_diff(utime.ticks_ms(), screen_start) > screen_interval:
             time = dst_time()
-            this_time = str(time[3])+':'+str(time[4])+':'+str(time[5])
-            print(this_time)
-            print_screen(this_time, temperature)
+            this_time = str(time[3])+':'+str(time[4])
+            print_screen(this_time, next_runtime, temperature)
             screen_start = utime.ticks_ms()
-        if time[3] == data['pump_hour'] and time[4] == data['pump_min']:
-            pump.value(1)
-            utime.sleep_ms(data['pump_runtime']) # this is a blocking command, but shouldn't be an issue.
-            pump.value(0)
+
+        if (time[3] == int(data['pump_hour'])) and (time[4] == int(data['pump_min'])):
+            if pump_run:
+                pump.value(1)
+                print_screen(this_time, 'Pump On', temperature)
+                print(data['pump_runtime'])
+                utime.sleep_ms(data['pump_runtime']) # this is a blocking command, but shouldn't be an issue.
+                pump.value(0)
+                print_screen(this_time, next_runtime, temperature)
+                pump_run = 0
+        else:
+            pump_run = 1
 
         r, w, err = select.select((s,), (), (), 1)
         if r:
@@ -181,6 +195,8 @@ def main():
                 print('Content = %s' % request)
                 pump_on = request.find('/?pump=on')
                 pump_off = request.find('/?pump=off')
+                prime_on = request.find('/?prime=on')
+                prime_off = request.find('/?prime=off')
                 set_time = request.find('/?phour')
                 if pump_on == 6:
                     print('LED ON')
@@ -192,11 +208,18 @@ def main():
                     callibrate_stop = utime.ticks_ms()
                     data['pump_runtime'] = callibrate_stop - callibrate_start
                     json_write()
+                if prime_on == 6:
+                    print('LED ON')
+                    pump.value(1)
+                if prime_off == 6:
+                    print('LED OFF')
+                    pump.value(0)
                 if set_time == 6:
                     parameters = qs_parse(request)
                     print(parameters)
                     data['pump_hour'] = parameters['phour']
                     data['pump_min'] = parameters['pmin']
+                    next_runtime = str(data['pump_hour'])+':'+str(data['pump_min'])
                     print(data)
                     json_write()
 
@@ -207,7 +230,7 @@ def main():
                 conn.sendall(response)
                 conn.close()
 
-print_screen('Initializing', '...')
+print_screen('Initializing', '', '...')
 ntp.settime()
 time = dst_time()
 print(time)

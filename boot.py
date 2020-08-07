@@ -19,7 +19,6 @@ oled_height = 32
 
 oled = ssd1306.SSD1306_I2C(oled_width, oled_height, i2c)
 oled.fill(0)
-oled.text("IP Addy:", 0, 0)
-oled.text(sta_if.ifconfig()[0], 0, 10)
+oled.text("Booting", 0, 0)
+oled.text("Tank Doser v0.1", 0, 10)
 oled.show()
-

@@ -16,5 +16,4 @@ def dst_time():
     else: # we are after last sunday of october
         dst = time.localtime(now-21600) # EST: UTC-5H
 
-    print(dst)
     return dst

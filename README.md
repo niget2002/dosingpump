@@ -11,4 +11,7 @@ send this to a MQTT server and use Home Assistant to graph/track the information
 * D4 -> DS18b20 data
 * D5 -> IRF520 sig
 
+NOTE: need a 47nF capacitor across the output of the DC Motor Driver
+NOTE: need a 1N5817 diode across the output of the DC Motor Driver
+
 ![Diagram](diagram.png)
