@@ -61,21 +61,46 @@ def web_page():
 
     html = """<html><head> <title>Dosing Pump Controller</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <link rel="icon" href="data:,"> <style>html{font-family: Helvetica; display:inline-block; margin: 0px auto; text-align: center;}
-    h1{color: #0F3376; padding: 2vh;}p{font-size: 1.5rem;}.button{display: inline-block; background-color: #e7bd3b; border: none;
-    border-radius: 4px; color: white; padding: 16px 40px; text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}
+    <link rel="icon" href="data:,">
+    <style>
+    html{font-family: Helvetica; display:inline-block; margin: 0px auto; text-align: center;}
+    .center{margin-left: auto; margin-right: auto;}
+    h1{color: #0F3376; padding: 2vh;}
+    tr{font-size: 1.5rem;}
+    td{text-align: center;}
+    table, tr, td{border: 1px solid black;}
+    .button{display: inline-block; background-color: #e7bd3b; border: none; border-radius: 4px; color: white; padding: 16px 40px; text-decoration: none; font-size: 30px; margin: 2px; cursor: pointer;}
     .button2{background-color: #4286f4;}</style></head>
-    <body><h1>Dosing Pump Setup</h1>
-    <p>PUMP state: <strong>""" + gpio_state + """</strong></p>
-    <p>Current Start Time: """ + str(data['pump_hour']) + """:""" + str(data['pump_min']) + """</p>
-    <p><form action="/?settime">Set Start Time</p>
-    <p><input type=text id=phour name=phour size=2>:<input type=text id=pmin name=pmin size=2><input type=submit value=submit></form></p>
-    <p>Current Run Length: """ + str(data['pump_runtime']) + """</p>
-    <p>Callibrate Run Length</p>
-    <p><a href="/?pump=on"><button class="button">Callibrate Start</button></a></p>
-    <p><a href="/?pump=off"><button class="button button2">Callibrate Stop</button></a></p>
-    <p><a href="/?prime=on"><button class="button">Prime Start</button></a></p>
-    <p><a href="/?prime=off"><button class="button button2">Prime Stop</button></a></p>
+
+    <body>
+    <h1>Dosing Pump Setup</h1>
+    <table class="center">
+    <tr>
+        <td>PUMP state:</td><td><strong>""" + gpio_state + """</strong></td>
+    </tr>
+    <tr>
+        <td>Next Run Time:</td><td>""" + str(data['pump_hour']) + """:""" + str(data['pump_min']) + """</td>
+    </tr>
+    <tr>
+        <td>Set Run Time</td>
+        <td><form action="/?settime"><input type=text id=phour name=phour size=2>:<input type=text id=pmin name=pmin size=2></p><input type=submit value=submit></form></td>
+    </tr>
+    <tr>
+        <td>Current Run Length:</td>
+        <td>""" + str(data['pump_runtime']) + """</td>
+    </tr>
+    <tr>
+        <td>Set Run Length</td>
+        <td><form action="/?settime"><input type=text id=runtime name=runtime size=5> ms</p><input type=submit value=submit></form></td>
+    </tr>
+    <tr>
+        <td>Callibrate Run Length</td>
+        <td><a href="/?pump=on"><button class="button">Callibrate Start</button></a></p><p><a href="/?pump=off"><button class="button button2">Callibrate Stop</button></a></td>
+    <tr>
+        <td>Prime Pump</td>
+        <td><a href="/?prime=on"><button class="button">Prime Start</button></a></p><p><a href="/?prime=off"><button class="button button2">Prime Stop</button></a></td>
+    </tr>
+    </table>
     </body></html>"""
     return html
 
@@ -141,7 +166,7 @@ def c_to_f(c):
 def qs_parse(qs):
     parameters = {}
     spaceSplit = qs.split(" ")
-    matching = [s for s in spaceSplit if "phour" in s]
+    matching = [s for s in spaceSplit if "?" in s]
     ampersandSplit = matching[0].split("&")
     for element in ampersandSplit:
         equalSplit = element.split("=")
@@ -177,14 +202,21 @@ def main():
             if pump_run:
                 pump.value(1)
                 print_screen(this_time, 'Pump On', temperature)
-                print(data['pump_runtime'])
-                utime.sleep_ms(data['pump_runtime']) # this is a blocking command, but shouldn't be an issue.
+                print(data)
+                utime.sleep_ms(int(data['pump_runtime'])) # this is a blocking command, but shouldn't be an issue.
                 pump.value(0)
                 print_screen(this_time, next_runtime, temperature)
                 pump_run = 0
         else:
             pump_run = 1
 
+        if (time[4] == 0) and (time[5] == 0):
+            print("Setting Time")
+            try:
+                ntp.settime()
+            except:
+                print("Setting Time Failed")
+                
         r, w, err = select.select((s,), (), (), 1)
         if r:
             for readable in r:
@@ -198,6 +230,7 @@ def main():
                 prime_on = request.find('/?prime=on')
                 prime_off = request.find('/?prime=off')
                 set_time = request.find('/?phour')
+                set_runtime = request.find('/?runtime')
                 if pump_on == 6:
                     print('LED ON')
                     pump.value(1)
@@ -222,7 +255,12 @@ def main():
                     next_runtime = str(data['pump_hour'])+':'+str(data['pump_min'])
                     print(data)
                     json_write()
-
+                if set_runtime == 6:
+                    parameters = qs_parse(request)
+                    print(parameters)
+                    data['pump_runtime'] = parameters['runtime']
+                    print(data)
+                    json_write()
                 response = web_page()
                 conn.send('HTTP/1.1 200 OK\n')
                 conn.send('Content-Type: text/html\n')
