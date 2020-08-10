@@ -52,7 +52,7 @@ mixer_interval = 60000
 pump = machine.Pin(14, machine.Pin.OUT)
 
 # setup mixer
-mixer_pin = machine.Pin(15)
+mixer_pin = machine.Pin(12)
 mixer = machine.PWM(mixer_pin)
 mixer.freq(500)
 
