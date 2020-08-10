@@ -46,9 +46,15 @@ sta_if = network.WLAN(network.STA_IF)
 # setup Timing
 temp_interval = 5000
 screen_interval = 1000
+mixer_interval = 60000
 
 # setup pump
 pump = machine.Pin(14, machine.Pin.OUT)
+
+# setup mixer
+mixer_pin = machine.Pin(15)
+mixer = machine.PWM(mixer_pin)
+mixer.freq(500)
 
 # Setup Web Page
 def web_page():
@@ -173,6 +179,60 @@ def qs_parse(qs):
         parameters[equalSplit[0].replace('/?','')] = equalSplit[1]
     return parameters
 
+def load_web(r):
+    global data
+    global callibration_start
+    global callibration_stop
+    for readable in r:
+        conn, addr = s.accept()
+        print('Got a connection from %s' % str(addr))
+        request = conn.recv(1024)
+        request = str(request)
+        print('Content = %s' % request)
+        pump_on = request.find('/?pump=on')
+        pump_off = request.find('/?pump=off')
+        prime_on = request.find('/?prime=on')
+        prime_off = request.find('/?prime=off')
+        set_time = request.find('/?phour')
+        set_runtime = request.find('/?runtime')
+        if pump_on == 6:
+            print('LED ON')
+            pump.value(1)
+            callibrate_start = utime.ticks_ms()
+        if pump_off == 6:
+            print('LED OFF')
+            pump.value(0)
+            callibrate_stop = utime.ticks_ms()
+            data['pump_runtime'] = callibrate_stop - callibrate_start
+            json_write()
+        if prime_on == 6:
+            print('LED ON')
+            pump.value(1)
+        if prime_off == 6:
+            print('LED OFF')
+            pump.value(0)
+        if set_time == 6:
+            parameters = qs_parse(request)
+            print(parameters)
+            data['pump_hour'] = parameters['phour']
+            data['pump_min'] = parameters['pmin']
+            next_runtime = str(data['pump_hour'])+':'+str(data['pump_min'])
+            print(data)
+            json_write()
+        if set_runtime == 6:
+            parameters = qs_parse(request)
+            print(parameters)
+            data['pump_runtime'] = parameters['runtime']
+            print(data)
+            json_write()
+        response = web_page()
+        conn.send('HTTP/1.1 200 OK\n')
+        conn.send('Content-Type: text/html\n')
+        conn.send('Connection: close\n\n')
+        conn.sendall(response)
+        conn.close()
+
+
 def main():
     """main loop function"""
 
@@ -180,14 +240,21 @@ def main():
     global data
     temp_start = utime.ticks_ms()
     screen_start = utime.ticks_ms()
-    callibrate_start = temp_start # Initilize value in case website is in bad state
+    mixer_start = utime.ticks_ms()
+    pump_start = utime.ticks_ms()
+    global callibrate_start = temp_start # Initilize value in case website is in bad state
     time = dst_time()
-    pump_run = 1 # allows pump to run 1 time at next iteration
+    pump_run = 0 # allows pump to run 1 time at next iteration
     next_runtime = str(data['pump_hour'])+':'+str(data['pump_min'])
 
     temperature = "NOTEMP"
 
     while 1:
+
+        if (time[3] == int(data['pump_hour'])) and (time[4] == int(data['pump_min']) and (pump_latch != 1)):
+            pump_run = 1
+
+
         if utime.ticks_diff(utime.ticks_ms(), temp_start) > temp_interval:
             temperature = str(c_to_f(ds_sensor.read_temp(roms[0])))
             ds_sensor.convert_temp()
@@ -197,18 +264,23 @@ def main():
             this_time = str(time[3])+':'+str(time[4])
             print_screen(this_time, next_runtime, temperature)
             screen_start = utime.ticks_ms()
-
-        if (time[3] == int(data['pump_hour'])) and (time[4] == int(data['pump_min'])):
-            if pump_run:
+        if pump_run != 0:
+            if pump_run == 1:
+                mixer.duty(120)
+                print_screen(this_time, 'Mixer On', temperature)
+                print(data)
+                mixer_start = utime.ticks_ms()
+                pump_run = 2
+            if (pump_run == 2) and (utime.ticks_diff(utime.ticks_ms(), mixer_start) > mixer_interval):
+                mixer.duty(0)
                 pump.value(1)
                 print_screen(this_time, 'Pump On', temperature)
-                print(data)
-                utime.sleep_ms(int(data['pump_runtime'])) # this is a blocking command, but shouldn't be an issue.
+                pump_start = utime.ticks_ms()
+                pump_run = 3
+            if (pump_run == 3) and (utime.ticks_diff(utime.tics_ms(), pump_start) > int(data(['pump_runtime']))):
                 pump.value(0)
                 print_screen(this_time, next_runtime, temperature)
                 pump_run = 0
-        else:
-            pump_run = 1
 
         if (time[4] == 0) and (time[5] == 0):
             print("Setting Time")
@@ -216,57 +288,10 @@ def main():
                 ntp.settime()
             except:
                 print("Setting Time Failed")
-                
-        r, w, err = select.select((s,), (), (), 1)
+
+        r, w, err = select.select((s,), (), (), .5)
         if r:
-            for readable in r:
-                conn, addr = s.accept()
-                print('Got a connection from %s' % str(addr))
-                request = conn.recv(1024)
-                request = str(request)
-                print('Content = %s' % request)
-                pump_on = request.find('/?pump=on')
-                pump_off = request.find('/?pump=off')
-                prime_on = request.find('/?prime=on')
-                prime_off = request.find('/?prime=off')
-                set_time = request.find('/?phour')
-                set_runtime = request.find('/?runtime')
-                if pump_on == 6:
-                    print('LED ON')
-                    pump.value(1)
-                    callibrate_start = utime.ticks_ms()
-                if pump_off == 6:
-                    print('LED OFF')
-                    pump.value(0)
-                    callibrate_stop = utime.ticks_ms()
-                    data['pump_runtime'] = callibrate_stop - callibrate_start
-                    json_write()
-                if prime_on == 6:
-                    print('LED ON')
-                    pump.value(1)
-                if prime_off == 6:
-                    print('LED OFF')
-                    pump.value(0)
-                if set_time == 6:
-                    parameters = qs_parse(request)
-                    print(parameters)
-                    data['pump_hour'] = parameters['phour']
-                    data['pump_min'] = parameters['pmin']
-                    next_runtime = str(data['pump_hour'])+':'+str(data['pump_min'])
-                    print(data)
-                    json_write()
-                if set_runtime == 6:
-                    parameters = qs_parse(request)
-                    print(parameters)
-                    data['pump_runtime'] = parameters['runtime']
-                    print(data)
-                    json_write()
-                response = web_page()
-                conn.send('HTTP/1.1 200 OK\n')
-                conn.send('Content-Type: text/html\n')
-                conn.send('Connection: close\n\n')
-                conn.sendall(response)
-                conn.close()
+            load_web(r)
 
 print_screen('Initializing', '', '...')
 ntp.settime()
