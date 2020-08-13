@@ -46,7 +46,6 @@ sta_if = network.WLAN(network.STA_IF)
 # setup Timing
 temp_interval = 5000
 screen_interval = 1000
-mixer_interval = 60000
 
 # setup pump
 pump = machine.Pin(14, machine.Pin.OUT)
@@ -55,6 +54,11 @@ pump = machine.Pin(14, machine.Pin.OUT)
 mixer_pin = machine.Pin(12)
 mixer = machine.PWM(mixer_pin)
 mixer.freq(500)
+
+callibrate_start = 0
+callibrate_stop = 0
+next_runtime = "TEMP"
+message = "NOMESS"
 
 # Setup Web Page
 def web_page():
@@ -156,7 +160,7 @@ def json_write():
 
 
 # Function initilization
-def print_screen(data0, data1, data2):
+def print_screen(data0, data1, data2, data3):
     """prints data to the OLED"""
     global data
     OLED.fill(0)
@@ -164,6 +168,7 @@ def print_screen(data0, data1, data2):
     OLED.text(data0, 0, 10)
     OLED.text(data1, 50, 10)
     OLED.text(data2, 0, 20)
+    OLED.text(data3, 50, 20)
     OLED.show()
 
 def c_to_f(c):
@@ -181,8 +186,9 @@ def qs_parse(qs):
 
 def load_web(r):
     global data
-    global callibration_start
-    global callibration_stop
+    global callibrate_start
+    global callibrate_stop
+    global next_runtime
     for readable in r:
         conn, addr = s.accept()
         print('Got a connection from %s' % str(addr))
@@ -242,17 +248,28 @@ def main():
     screen_start = utime.ticks_ms()
     mixer_start = utime.ticks_ms()
     pump_start = utime.ticks_ms()
-    global callibrate_start = temp_start # Initilize value in case website is in bad state
+    global callibrate_start # Initilize value in case website is in bad state
     time = dst_time()
     pump_run = 0 # allows pump to run 1 time at next iteration
-    next_runtime = str(data['pump_hour'])+':'+str(data['pump_min'])
+    global next_runtime
+    global message
+    run_times = [0, 30000, 5000  ] # placeholder, mixer runtime, pause run time,
 
     temperature = "NOTEMP"
 
     while 1:
+        run_times = [0, 30000, 5000, int(data['pump_runtime']) ] # placeholder, mixer runtime, pause run time,
 
-        if (time[3] == int(data['pump_hour'])) and (time[4] == int(data['pump_min']) and (pump_latch != 1)):
+
+        if ((time[3] == int(data['pump_hour'])) and (time[4] == int(data['pump_min'])) and (pump_run == 0)):
+            print("Starting Pump Run")
             pump_run = 1
+            pump_start = utime.ticks_ms()
+            mixer.duty(300)
+            utime.sleep_ms(500)
+            mixer.duty(120)
+            message = "MixerOn"
+            print("Starting Mixer")
 
 
         if utime.ticks_diff(utime.ticks_ms(), temp_start) > temp_interval:
@@ -262,25 +279,27 @@ def main():
         if utime.ticks_diff(utime.ticks_ms(), screen_start) > screen_interval:
             time = dst_time()
             this_time = str(time[3])+':'+str(time[4])
-            print_screen(this_time, next_runtime, temperature)
+            next_runtime = str(data['pump_hour'])+':'+str(data['pump_min'])
+            print_screen(this_time, next_runtime, temperature, message)
             screen_start = utime.ticks_ms()
         if pump_run != 0:
-            if pump_run == 1:
-                mixer.duty(120)
-                print_screen(this_time, 'Mixer On', temperature)
-                print(data)
-                mixer_start = utime.ticks_ms()
-                pump_run = 2
-            if (pump_run == 2) and (utime.ticks_diff(utime.ticks_ms(), mixer_start) > mixer_interval):
-                mixer.duty(0)
-                pump.value(1)
-                print_screen(this_time, 'Pump On', temperature)
-                pump_start = utime.ticks_ms()
-                pump_run = 3
-            if (pump_run == 3) and (utime.ticks_diff(utime.tics_ms(), pump_start) > int(data(['pump_runtime']))):
-                pump.value(0)
-                print_screen(this_time, next_runtime, temperature)
-                pump_run = 0
+            if utime.ticks_diff(utime.ticks_ms(), pump_start) > run_times[pump_run]:
+                if pump_run == 1:
+                    mixer.duty(0)
+                    message = "Pausing"
+                    pump_start = utime.ticks_ms()
+                    print("Starting Pump")
+                    pump_run = 2
+                if pump_run == 2:
+                    pump.value(1)
+                    message = "Pump On"
+                    pump_run = 3
+                    pump_start = utime.ticks_ms()
+                if pump_run = 3:
+                    pump.value(0)
+                    message = ""
+                    print("Turning Pump Off")
+                    pump_run = 0
 
         if (time[4] == 0) and (time[5] == 0):
             print("Setting Time")
@@ -289,11 +308,11 @@ def main():
             except:
                 print("Setting Time Failed")
 
-        r, w, err = select.select((s,), (), (), .5)
+        r, w, err = select.select((s,), (), (), 1)
         if r:
             load_web(r)
 
-print_screen('Initializing', '', '...')
+print_screen('Initializing', '', '...', '')
 ntp.settime()
 time = dst_time()
 print(time)
