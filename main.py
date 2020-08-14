@@ -261,13 +261,13 @@ def main():
         run_times = [0, 30000, 5000, int(data['pump_runtime']) ] # placeholder, mixer runtime, pause run time,
 
 
-        if ((time[3] == int(data['pump_hour'])) and (time[4] == int(data['pump_min'])) and (pump_run == 0)):
+        if ((time[3] == int(data['pump_hour'])) and (time[4] == int(data['pump_min'])) and (time[5] < 10) and (pump_run == 0)):
             print("Starting Pump Run")
             pump_run = 1
             pump_start = utime.ticks_ms()
-            mixer.duty(300)
+            mixer.duty(300) # bump up current to get motor to start spinning
             utime.sleep_ms(500)
-            mixer.duty(120)
+            mixer.duty(120) # drop to actual mixing speed
             message = "MixerOn"
             print("Starting Mixer")
 
@@ -284,23 +284,22 @@ def main():
             screen_start = utime.ticks_ms()
         if pump_run != 0:
             if utime.ticks_diff(utime.ticks_ms(), pump_start) > run_times[pump_run]:
+                if pump_run == 3:
+                    pump.value(0)
+                    message = ""
+                    print("Turning Pump Off")
+                    pump_run = 0
+                if pump_run == 2:
+                    pump.value(1)
+                    message = "Pump On"
+                    pump_run = 3
+                    pump_start = utime.ticks_ms()
                 if pump_run == 1:
                     mixer.duty(0)
                     message = "Pausing"
                     pump_start = utime.ticks_ms()
                     print("Starting Pump")
                     pump_run = 2
-                if pump_run == 2:
-                    pump.value(1)
-                    message = "Pump On"
-                    pump_run = 3
-                    pump_start = utime.ticks_ms()
-                if pump_run = 3:
-                    pump.value(0)
-                    message = ""
-                    print("Turning Pump Off")
-                    pump_run = 0
-
         if (time[4] == 0) and (time[5] == 0):
             print("Setting Time")
             try:
